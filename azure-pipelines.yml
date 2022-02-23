@@ -1,0 +1,83 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- main
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+- name: 'terraformstoragerg'
+  value: 'terraformrg'
+- name: 'terraformstorageaccount'
+  value: 'terraformstoragedc5415e2'
+
+steps:
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: 'Subscription-Moog-Commercial-Dev/Test'
+    scriptType: 'ps'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      az group create -n $(terraformstoragerg) -l eastus
+      az storage account create --name $(terraformstorageaccount) --resource-group $(terraformstoragerg) -l eastus --sku Standard_LRS
+      
+      az storage container create -n terraform --account-name $(terraformstorageaccount)
+      
+      az storage account keys list -g $(terraformstoragerg) -n $(terraformstorageaccount)
+
+- task: replacetokens@3
+  inputs:
+    targetFiles: '**/*.config'
+    encoding: 'auto'
+    writeBOM: true
+    actionOnMissing: 'warn'
+    keepToken: false
+    tokenPrefix: '#{'
+    tokenSuffix: '}#'
+    useLegacyPattern: false
+    enableTransforms: false
+    enableTelemetry: true
+
+- task: ms-devlabs.custom-terraform-tasks.custom-terraform-installer-task.TerraformInstaller@0
+  displayName: 'Install Terraform 0.12.3'
+
+
+- task: ms-devlabs.custom-terraform-tasks.custom-terraform-release-task.TerraformTaskV1@0
+  displayName: 'Terraform init network'
+  inputs:
+    workingDirectory: '1. network'
+    backendServiceArm: 'Subscription-Moog-Commercial-Dev/Test'
+    backendAzureRmResourceGroupName: terraformrg
+    backendAzureRmStorageAccountName: terraformstoragedc5415e2
+    backendAzureRmContainerName: terraform
+    backendAzureRmKey: 'network.tfstate'
+
+- task: ms-devlabs.custom-terraform-tasks.custom-terraform-release-task.TerraformTaskV1@0
+  displayName: 'Terraform apply network'
+  inputs:
+    command: apply
+    workingDirectory: '1. network'
+    commandOptions: '-auto-approve'
+    environmentServiceNameAzureRM: 'Subscription-Moog-Commercial-Dev/Test'
+  
+- task: ms-devlabs.custom-terraform-tasks.custom-terraform-release-task.TerraformTaskV1@0
+  displayName: 'Terraform init agent'
+  inputs:
+    workingDirectory: '2. vmss-agents'
+    backendServiceArm: 'Subscription-Moog-Commercial-Dev/Test'
+    backendAzureRmResourceGroupName: terraformrg
+    backendAzureRmStorageAccountName: terraformstoragedc5415e2
+    backendAzureRmContainerName: terraform
+    backendAzureRmKey: 'agent.tfstate'
+
+- task: ms-devlabs.custom-terraform-tasks.custom-terraform-release-task.TerraformTaskV1@0
+  displayName: 'Terraform apply agent'
+  inputs:
+    command: apply
+    workingDirectory: '2. vmss-agents'
+    commandOptions: '-auto-approve'
+    environmentServiceNameAzureRM: 'Subscription-Moog-Commercial-Dev/Test'
